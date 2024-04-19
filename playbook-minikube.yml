@@ -1,0 +1,88 @@
+---
+- name: Setup minikube on Debian
+  hosts: debian-minikube
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+    - name: Install conntrack
+      apt:
+        name: conntrack
+        state: present
+    # Download minikube package to a temp location
+    - name: Download minikube package
+      get_url:
+        url: https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb
+        dest: /tmp/minikube_latest_amd64.deb
+        mode: '0755'
+    # Install minikube with dpkg
+    - name: Install minikube
+      command: "dpkg -i /tmp/minikube_latest_amd64.deb"
+    # Download crictl archive
+    - name: Download crictl
+      get_url:
+        url: https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.30.0/crictl-v1.30.0-linux-amd64.tar.gz
+        dest: /tmp/crictl-v1.30.0-linux-amd64.tar.gz
+        mode: '0755'
+    # Extract crictl archive
+    - name: Extract crictl
+      command: "tar -xvf /tmp/crictl-v1.30.0-linux-amd64.tar.gz -C /usr/local/bin"
+    # Download cri-dockerd
+    - name: Download cri-dockerd
+      get_url:
+        url: https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.12/cri-dockerd-0.3.12.amd64.tgz
+        dest: /tmp/cri-dockerd-0.3.12.amd64.tgz
+        mode: '0755'
+    # Extract cri-dockerd
+    - name: Extract cri-dockerd
+      command: "tar -xvf /tmp/cri-dockerd-0.3.12.amd64.tgz -C /tmp"
+    # Move /tmp/cri-dockerd/cri-dockerd to /usr/local/bin with owner root and group root
+    - name: Move cri-dockerd to /usr/local/bin
+      command: "mv /tmp/cri-dockerd/cri-dockerd /usr/local/bin"
+    # Download two files from cri-dockerd repo
+    - name: Download two files from cri-dockerd repo
+      get_url:
+        url: "{{ item }}"
+        dest: "/tmp/{{ item | basename }}"
+        mode: '0755'
+      with_items:
+        - https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.service
+        - https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.socket
+    # Move the last two files to /etc/systemd/system with owner root and group root (loop with items)
+    - name: Move two files to /etc/systemd/system
+      command: "mv /tmp/{{ item | basename }} /etc/systemd/system"
+      with_items:
+        - cri-docker.service
+        - cri-docker.socket
+    # Change /usr/bin to /usr/local/bin in cri-docker.service, original command was:
+    # sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' /etc/systemd/system/cri-docker.service
+    - name: Change /usr/bin to /usr/local/bin in cri-docker.service
+      replace:
+        path: /etc/systemd/system/cri-docker.service
+        regexp: '/usr/bin/cri-dockerd'
+        replace: '/usr/local/bin/cri-dockerd'
+    # Reload systemd (systemctl daemon-reload)
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+    # Enable cri-dockerd service
+    - name: Enable cri-dockerd service
+      systemd:
+        name: cri-docker
+        enabled: yes
+    # Download CNI plugins
+    - name: Download CNI plugins
+      get_url:
+        url: https://github.com/containernetworking/plugins/releases/download/v1.4.1/cni-plugins-linux-arm64-v1.4.1.tgz
+        dest: /tmp/cni-plugins-linux-arm64-v1.4.1.tgz
+        mode: '0755'
+    # Create /opt/cni/bin directory
+    - name: Create /opt/cni/bin directory
+      file:
+        path: /opt/cni/bin
+        state: directory
+        mode: '0755'
+    # Extract CNI plugins
+    - name: Extract CNI plugins
+      command: "tar -xvf /tmp/cni-plugins-linux-arm64-v1.4.1.tgz -C /opt/cni/bin"
